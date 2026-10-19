@@ -59,7 +59,8 @@ export function parseTranslationResponse(text, expectedLen) {
   if (arr.length !== expectedLen) {
     throw new Error(`length mismatch: expected ${expectedLen}, got ${arr.length}`);
   }
-  return arr.map((x) => (x == null ? '' : String(x)));
+  if (arr.some((x) => typeof x !== 'string')) throw new Error('non-string element in response');
+  return arr;
 }
 
 export async function translateBatch(settings, segments, { sourceLang, targetLang, signal }) {
@@ -72,7 +73,11 @@ export async function translateBatch(settings, segments, { sourceLang, targetLan
     },
     body: JSON.stringify(buildChatBody({ model: settings.model, segments, sourceLang, targetLang })),
   });
-  if (!res.ok) throw new Error(`API HTTP ${res.status}`);
+  if (!res.ok) {
+    const err = new Error(`API HTTP ${res.status}`);
+    err.status = res.status;
+    throw err;
+  }
   const data = await res.json();
   const content = data.choices && data.choices[0] && data.choices[0].message
     ? data.choices[0].message.content
