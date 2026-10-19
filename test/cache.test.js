@@ -28,3 +28,25 @@ test('cacheKey differs by lang and text', () => {
   assert.notEqual(cacheKey('a', 'zh'), cacheKey('a', 'ja'));
   assert.notEqual(cacheKey('a', 'zh'), cacheKey('b', 'zh'));
 });
+
+test('persists across cache instances (round-trip)', async () => {
+  const st = fakeStorage();
+  const a = createCache(st);
+  await a.set('hello', 'zh', '你好');
+  await a.flush();
+  const b = createCache(st);
+  assert.equal(await b.get('hello', 'zh'), '你好');
+});
+
+test('set is debounced; flush persists immediately', async () => {
+  const st = fakeStorage();
+  let writes = 0;
+  const wrapped = { get: (k) => st.get(k), set: (o) => { writes++; return st.set(o); } };
+  const c = createCache(wrapped, { max: 10, persistDelayMs: 50 });
+  await Promise.all(['a', 'b', 'c', 'd', 'e'].map((t) => c.set(t, 'zh', t)));
+  assert.equal(writes, 0); // still debounced
+  await c.flush();
+  assert.equal(writes, 1); // coalesced into one write
+  const reader = createCache(fakeStorage(st.db));
+  assert.equal(await reader.get('c', 'zh'), 'c');
+});
