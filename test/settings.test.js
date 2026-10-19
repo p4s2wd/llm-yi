@@ -32,3 +32,10 @@ test('saveSettings persists merged settings and ignores unknown keys', async () 
   assert.equal(next.junk, undefined);
   assert.deepEqual(st.db.settings, next);
 });
+
+test('saveSettings merges patch into existing stored settings', async () => {
+  const st = fakeStorage({ settings: { apiKey: 'k', model: 'a' } });
+  await saveSettings(st, { model: 'b' });
+  assert.equal(st.db.settings.apiKey, 'k');
+  assert.equal(st.db.settings.model, 'b');
+});
