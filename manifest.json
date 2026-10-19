@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "Local LLM Translate",
+  "version": "0.1.0",
+  "description": "Whole-page translation with your own local model (OpenAI-compatible API).",
+  "permissions": ["storage", "tabs"],
+  "host_permissions": ["<all_urls>"],
+  "background": { "service_worker": "background.js", "type": "module" },
+  "action": { "default_popup": "popup/popup.html" },
+  "options_page": "options/options.html",
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["content/toolbar.js", "content/content.js"],
+      "all_frames": true,
+      "run_at": "document_idle"
+    }
+  ]
+}
