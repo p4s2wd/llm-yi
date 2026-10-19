@@ -5,7 +5,8 @@ export function createPool(concurrency) {
     while (active < concurrency && queue.length) {
       active++;
       const { task, resolve, reject } = queue.shift();
-      task()
+      Promise.resolve()
+        .then(task)
         .then(resolve, reject)
         .finally(() => { active--; pump(); });
     }

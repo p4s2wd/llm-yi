@@ -23,3 +23,12 @@ test('task error propagates but queue keeps draining', async () => {
   await assert.rejects(bad, /boom/);
   assert.equal(await good, 42);
 });
+
+test('synchronously throwing task rejects cleanly and pool keeps working', async () => {
+  const pool = createPool(1);
+  const warm = pool.run(async () => { await sleep(5); return 'warm'; });
+  const bad = pool.run(() => { throw new Error('sync-boom'); });
+  await assert.rejects(bad, /sync-boom/);
+  await warm;
+  assert.equal(await pool.run(async () => 'alive'), 'alive');
+});
