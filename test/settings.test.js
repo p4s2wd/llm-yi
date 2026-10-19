@@ -1,15 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DEFAULTS, loadSettings, saveSettings } from '../engine/settings.js';
-
-export function fakeStorage(init = {}) {
-  const db = { ...init };
-  return {
-    db,
-    async get(keys) { const out = {}; for (const k of [].concat(keys)) if (k in db) out[k] = db[k]; return out; },
-    async set(obj) { Object.assign(db, obj); },
-  };
-}
+import { fakeStorage } from './helpers.js';
 
 test('loadSettings returns defaults when empty', async () => {
   const s = await loadSettings(fakeStorage());
