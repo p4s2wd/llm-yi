@@ -40,18 +40,19 @@ async function runBatch(settings, batch, { sourceLang, targetLang, signal }) {
   for (let attempt = 0; attempt < 2; attempt++) {
     const batchSignal = AbortSignal.any([signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)]);
     try {
-      return await translateBatch(settings, batch, { sourceLang, targetLang, signal: batchSignal });
+      const out = await translateBatch(settings, batch, { sourceLang, targetLang, signal: batchSignal });
+      return batch.map((seg, i) => ({ ok: true, text: out[i] }));
     } catch (err) {
       if (isFatal(err) || signal.aborted) throw err;
       if (attempt === 1) {
-        // Last resort: translate one segment at a time; keep original text for stragglers.
+        // Last resort: translate one segment at a time; failures keep original text (ok:false).
         return Promise.all(batch.map(async (seg) => {
           try {
             const segSignal = AbortSignal.any([signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)]);
-            return (await translateBatch(settings, [seg], { sourceLang, targetLang, signal: segSignal }))[0];
+            return { ok: true, text: (await translateBatch(settings, [seg], { sourceLang, targetLang, signal: segSignal }))[0] };
           } catch (inner) {
-            if (isFatal(inner)) throw inner;
-            return seg.text;
+            if (isFatal(inner) || signal.aborted) throw inner;
+            return { ok: false, text: seg.text };
           }
         }));
       }
@@ -76,13 +77,16 @@ async function translateAll({ segments, sourceLang, targetLang, tabId, signal })
 
   const batches = packSegments(todo);
   const p = getPool(settings.concurrency);
+  let jobFailed = false;
   await Promise.all(batches.map((batch) => p.run(async () => {
     if (signal.aborted) return;
     const out = await runBatch(settings, batch, { sourceLang, targetLang, signal });
     if (!out) return;
     batch.forEach((seg, i) => {
-      results[seg.index] = out[i];
-      cache.set(seg.text, targetLang, out[i]).catch(() => {});
+      results[seg.index] = out[i].text;
+      // Only cache real translations; never cache fallback originals (would poison the cache).
+      if (out[i].ok && out[i].text !== seg.text) cache.set(seg.text, targetLang, out[i].text).catch(() => {});
+      if (!out[i].ok) jobFailed = true;
     });
     doneCount += batch.length;
     notify();
@@ -90,7 +94,8 @@ async function translateAll({ segments, sourceLang, targetLang, tabId, signal })
 
   await cache.flush().catch(() => {});
 
-  const partial = results.some((r) => r == null);
+  // Contract: segments arrive with index === position (content.js builds them that way).
+  const partial = jobFailed || results.some((r) => r == null);
   if (partial) for (let i = 0; i < results.length; i++) if (results[i] == null) results[i] = segments[i].text;
   return { results, bilingual: settings.bilingual, partial };
 }
@@ -130,8 +135,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       try {
         const url = msg.baseUrl.replace(/\/+$/, '') + '/models';
         const res = await fetch(url, { headers: msg.apiKey ? { Authorization: `Bearer ${msg.apiKey}` } : {} });
-        const data = await res.json();
-        sendResponse({ ok: res.ok, status: res.status, models: (data.data || []).map((m) => m.id) });
+        let models = [];
+        try {
+          const data = await res.json();
+          models = (data.data || []).map((m) => m.id);
+        } catch { /* non-JSON error body (HTML 404/5xx) — status still tells the story */ }
+        sendResponse({ ok: res.ok, status: res.status, models });
       } catch (e) {
         sendResponse({ ok: false, error: String((e && e.message) || e) });
       }
