@@ -18,6 +18,8 @@ test('language-level rule follows global switch; unknown lang never auto', () =>
   assert.equal(shouldAutoTranslate({ pageLang: 'en', targetLang: 'zh-CN', siteRule: null, autoTranslateNonTarget: true }), true);
   assert.equal(shouldAutoTranslate({ pageLang: 'en', targetLang: 'zh-CN', siteRule: null, autoTranslateNonTarget: false }), false);
   assert.equal(shouldAutoTranslate({ pageLang: null, targetLang: 'zh-CN', siteRule: null, autoTranslateNonTarget: true }), false);
+  assert.equal(shouldAutoTranslate({ pageLang: 'und', targetLang: 'zh-CN', siteRule: null, autoTranslateNonTarget: true }), false);
+  assert.equal(shouldAutoTranslate({ pageLang: 'en', targetLang: 'zh-CN', siteRule: 'yes', autoTranslateNonTarget: true }), true); // garbage siteRule falls open
 });
 
 test('domainOf and normLang basics', () => {

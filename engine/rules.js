@@ -12,7 +12,7 @@ export function domainOf(url) {
 
 export function shouldAutoTranslate({ pageLang, targetLang, siteRule, autoTranslateNonTarget }) {
   if (siteRule === 'never') return false;
-  if (!pageLang || normLang(pageLang) === normLang(targetLang)) return false;
+  if (!pageLang || pageLang === 'und' || normLang(pageLang) === normLang(targetLang)) return false;
   if (siteRule === 'always') return true;
   return !!autoTranslateNonTarget;
 }
