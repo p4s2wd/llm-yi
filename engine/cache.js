@@ -18,10 +18,16 @@ export function createCache(storage, { max = 3000, persistDelayMs = 400 } = {}) 
 
   function load() {
     if (!loading) {
-      loading = storage.get('cache').then((stored) => {
-        const raw = stored.cache && typeof stored.cache === 'object' ? stored.cache : {};
-        return new Map(Object.entries(raw));
-      });
+      loading = storage
+        .get('cache')
+        .then((stored) => {
+          const raw = stored.cache && typeof stored.cache === 'object' ? stored.cache : {};
+          return new Map(Object.entries(raw));
+        })
+        .catch((err) => {
+          loading = null; // allow retry on next call instead of caching a rejected promise forever
+          throw err;
+        });
     }
     return loading;
   }
