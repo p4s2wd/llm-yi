@@ -58,20 +58,31 @@ async function runBatch(settings, batch, { sourceLang, targetLang, signal }) {
   }
 }
 
-async function translateAll({ segments, sourceLang, targetLang, tabId, signal }) {
+// 逐批写回（tr-batch）：不等全量聚合，缓存命中与每个批次的完成结果即时写回页面。
+// 防串线：translate-page 由某 frame 发出；push 用 {frameId} 定向投递，progress 数字与 items 只属于该
+// frame 的请求。gen 由 content 发起请求时附带、background 原样回传，用于 content 侧换代丢弃。
+async function translateAll({ segments, sourceLang, targetLang, tabId, signal, gen, frameId }) {
   const settings = await loadSettings(storage);
   const results = new Array(segments.length).fill(null);
   const todo = [];
+  const cachedItems = []; // 缓存命中的结果，扫描完立即作为第一批推出
   for (const seg of segments) {
     const hit = await cache.get(seg.text, targetLang);
-    if (hit !== undefined) results[seg.index] = hit;
+    if (hit !== undefined) {
+      results[seg.index] = hit;
+      cachedItems.push({ index: seg.index, ok: true, text: hit });
+    }
     else todo.push(seg);
   }
   let doneCount = segments.length - todo.length;
-  const notify = () =>
+  const push = (items) =>
     tabId != null &&
-    chrome.tabs.sendMessage(tabId, { type: 'tr-progress', done: doneCount, total: segments.length }).catch(() => {});
-  notify();
+    chrome.tabs.sendMessage(
+      tabId,
+      { type: 'tr-batch', gen, done: doneCount, total: segments.length, bilingual: settings.bilingual, items },
+      frameId != null ? { frameId } : {},
+    ).catch(() => {});
+  push(cachedItems); // 刷新同页时命中部分即时上屏——"立刻翻译"的关键
 
   const batches = packSegments(todo);
   const p = getPool(settings.concurrency);
@@ -80,14 +91,16 @@ async function translateAll({ segments, sourceLang, targetLang, tabId, signal })
     if (signal.aborted) return;
     const out = await runBatch(settings, batch, { sourceLang, targetLang, signal });
     if (!out) return;
+    const items = [];
     batch.forEach((seg, i) => {
       results[seg.index] = out[i].text;
       // Only cache real translations; never cache fallback originals (would poison the cache).
       if (out[i].ok && out[i].text !== seg.text) cache.set(seg.text, targetLang, out[i].text).catch(() => {});
       if (!out[i].ok) jobFailed = true;
+      items.push({ index: seg.index, ok: out[i].ok, text: out[i].text }); // ok:false 兜底原文也发，content 侧跳过写回
     });
     doneCount += batch.length;
-    notify();
+    push(items);
   })));
 
   await cache.flush().catch(() => {});
@@ -122,7 +135,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     const controller = new AbortController();
     const jobKey = tabId != null ? `${tabId}:${sender.frameId ?? 0}` : null;
     if (jobKey) jobs.set(jobKey, controller);
-    translateAll({ ...msg, tabId, signal: controller.signal })
+    translateAll({ ...msg, tabId, frameId: sender && sender.frameId, signal: controller.signal })
       .then((r) => sendResponse({ ok: true, ...r }))
       .catch((e) => sendResponse({ ok: false, error: String((e && e.message) || e) }))
       .finally(() => { if (jobKey && jobs.get(jobKey) === controller) jobs.delete(jobKey); });

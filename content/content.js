@@ -1,4 +1,4 @@
-// DOM 收集、写回、还原、SPA 增量翻译、与 background 消息。
+// DOM 收集、逐批写回（tr-batch 分批上屏）、还原、SPA 增量翻译、与 background 消息。
 (() => {
   const SKIP = 'script,style,noscript,textarea,input,select,code,pre,svg,template,[contenteditable],[translate="no"],.notranslate,[data-notranslate]';
   const isTop = window.top === window.self;
@@ -8,6 +8,8 @@
   let translating = false, showingOriginal = false, moTimer = null, moStarted = false;
   let gen = 0; // 请求代际计数：用户操作递增，使迟到的响应作废
   let pending = false; // 请求期间是否有 DOM 变更，完成后补翻
+  let activeGen = null; // 当前在途请求的代际（防止 frame 间/换代后的 tr-batch 串写）
+  let activeSegments = null; // 在途请求的 segments（index -> {node,text} 映射）
   const state = { translated: false, pageLang: null, targetLang: null };
 
   function isVisible(node) {
@@ -39,24 +41,26 @@
     return segments;
   }
 
+  function applyOne(seg, t, bilingual) {
+    if (!t || originals.has(seg.node) || done.has(seg.node)) return; // tr-batch 已应用过则最终响应到达也幂等跳过；空文本不写回
+    if (t === seg.text) return; // 兜底原文不写回
+    t = t.replace(/\s+/g, ' ').trim(); // 写回前归一化，与 collectSegments 的检测形成闭环，防无限重译
+    originals.set(seg.node, { original: seg.node.nodeValue, translated: t });
+    done.add(seg.node);
+    seg.node.nodeValue = t;
+    if (bilingual) {
+      const span = document.createElement('span');
+      span.setAttribute('data-notranslate', '');
+      span.style.cssText = 'display:block;color:#888;font-size:0.85em;';
+      span.textContent = seg.text;
+      seg.node.parentElement.insertBefore(span, seg.node.nextSibling);
+      bilingualSpans.push(span);
+    }
+  }
+
   function applyResults(segments, results, bilingual) {
     translating = true;
-    segments.forEach((seg, i) => {
-      let t = results[i];
-      if (!t || t === seg.text) return;
-      t = t.replace(/\s+/g, ' ').trim(); // 写回前归一化，与 collectSegments 的检测形成闭环，防无限重译
-      originals.set(seg.node, { original: seg.node.nodeValue, translated: t });
-      done.add(seg.node);
-      seg.node.nodeValue = t;
-      if (bilingual) {
-        const span = document.createElement('span');
-        span.setAttribute('data-notranslate', '');
-        span.style.cssText = 'display:block;color:#888;font-size:0.85em;';
-        span.textContent = seg.text;
-        seg.node.parentElement.insertBefore(span, seg.node.nextSibling);
-        bilingualSpans.push(span);
-      }
-    });
+    segments.forEach((seg, i) => applyOne(seg, results[i], bilingual));
     translating = false;
     state.translated = true;
   }
@@ -89,12 +93,13 @@
     });
   }
 
-  async function requestTranslation(segments, sourceLang) {
+  async function requestTranslation(segments, sourceLang, gen) {
     return chrome.runtime.sendMessage({
       type: 'translate-page',
       segments: segments.map(({ index, text }) => ({ index, text })),
       sourceLang: sourceLang || 'auto',
       targetLang: state.targetLang,
+      gen,
     });
   }
 
@@ -108,9 +113,10 @@
     const segments = collectSegments();
     if (!segments.length) return;
     translating = true;
+    activeGen = myGen; activeSegments = segments; // 请求发出前置位，tr-batch 只认这组指针
     if (isTop) globalThis.trToolbar.progress(0, segments.length);
     try {
-      const resp = await requestTranslation(segments, sourceLang);
+      const resp = await requestTranslation(segments, sourceLang, myGen);
       if (myGen !== gen) return; // 等待期间用户已操作，丢弃迟到响应
       if (!resp || !resp.ok) { if (isTop) globalThis.trToolbar.error((resp && resp.error) || '翻译服务不可用'); return; }
       applyResults(segments, resp.results, resp.bilingual);
@@ -134,8 +140,9 @@
     const segments = collectSegments();
     if (!segments.length) return;
     translating = true;
+    activeGen = myGen; activeSegments = segments;
     try {
-      const resp = await requestTranslation(segments, state.pageLang);
+      const resp = await requestTranslation(segments, state.pageLang, myGen);
       if (myGen !== gen) return; // 等待期间用户已操作，丢弃迟到响应
       if (resp && resp.ok) applyResults(segments, resp.results, resp.bilingual);
     } catch { /* 增量失败静默，下次 mutation 再试 */ }
@@ -159,7 +166,15 @@
   }
 
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-    if (msg.type === 'tr-progress') { if (isTop) globalThis.trToolbar.progress(msg.done, msg.total); return; }
+    if (msg.type === 'tr-batch') {
+      if (msg.gen !== activeGen || !activeSegments) return; // 本 frame 无在途请求或已换代，丢弃
+      for (const item of msg.items || []) {
+        const seg = activeSegments[item.index];
+        if (seg) applyOne(seg, item.ok ? item.text : null, msg.bilingual);
+      }
+      if (isTop) globalThis.trToolbar.progress(msg.done, msg.total);
+      return;
+    }
     if (msg.type === 'popup-get-state') { sendResponse({ translated: state.translated, showingOriginal, pageLang: state.pageLang }); return; }
     if (msg.type === 'popup-translate') { if (msg.targetLang) state.targetLang = msg.targetLang; doTranslate(msg.sourceLang || state.pageLang || 'auto'); sendResponse({ ok: true }); return; }
     if (msg.type === 'popup-restore') { restoreOriginal(); showingOriginal = true; showToolbar(); sendResponse({ ok: true }); return; }
@@ -196,7 +211,8 @@
     if (!resp) return;
     state.pageLang = resp.pageLang;
     state.targetLang = resp.targetLang;
-    if (resp.autoTranslate) { doTranslate(resp.pageLang || 'auto'); return; }
+    if (resp.autoTranslate) doTranslate(resp.pageLang || 'auto');
+    // document_end 时 JS 渲染页面可能连正文都没有（0 段不触发翻译）——无条件排重判，recheck 守卫会自动跳过已完成/在途的情况
     if (isTop) recheckTimers = [setTimeout(recheck, 3000), setTimeout(recheck, 10000)];
   }
   init();
