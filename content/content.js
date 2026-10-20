@@ -67,6 +67,8 @@
 
   function restoreOriginal() {
     cancelRechecks(); // 用户还原或开始新一轮翻译，取消挂起的延迟重判，防止其稍后覆盖用户意图
+    activeGen = null; // 迟到的 tr-batch（背景 job 未取消）一律丢弃，防止覆盖刚还原的内容
+    activeSegments = null;
     gen++;
     pending = false;
     translating = true;
