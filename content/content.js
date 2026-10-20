@@ -164,20 +164,35 @@
     if (msg.type === 'popup-restore') { restoreOriginal(); showingOriginal = true; showToolbar(); sendResponse({ ok: true }); return; }
   });
 
-  async function init() {
-    if (!/^https?:$/.test(location.protocol)) return;
-    let resp;
+  async function askPageInit() {
     try {
-      resp = await chrome.runtime.sendMessage({
+      return await chrome.runtime.sendMessage({
         type: 'page-init',
         lang: document.documentElement.lang || null,
         sample: ((document.body && document.body.innerText) || '').slice(0, 2000),
       });
-    } catch { return; }
+    } catch { return null; }
+  }
+
+  // JS 重渲染页面的正文在 document_idle 时可能还没出现，语言判定会用导航碎片做出错误结论。
+  // 3s/10s 各重判一次：正文渲染完成后样本足够成熟，background 会给出新的判定。
+  async function recheck() {
+    if (state.translated || translating) return;
+    const resp = await askPageInit();
+    if (!resp || !resp.autoTranslate) return;
+    state.pageLang = resp.pageLang;
+    state.targetLang = resp.targetLang;
+    doTranslate(resp.pageLang || 'auto');
+  }
+
+  async function init() {
+    if (!/^https?:$/.test(location.protocol)) return;
+    const resp = await askPageInit();
     if (!resp) return;
     state.pageLang = resp.pageLang;
     state.targetLang = resp.targetLang;
-    if (resp.autoTranslate) doTranslate(resp.pageLang || 'auto');
+    if (resp.autoTranslate) { doTranslate(resp.pageLang || 'auto'); return; }
+    if (isTop) { setTimeout(recheck, 3000); setTimeout(recheck, 10000); }
   }
   init();
 })();
