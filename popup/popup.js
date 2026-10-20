@@ -13,19 +13,24 @@ async function init() {
     chrome.storage.local.set({ settings: { ...settings, targetLang: $('#target').value } });
 
   let page = { translated: false };
-  try { page = (await chrome.tabs.sendMessage(tab.id, { type: 'popup-get-state' })) || page; } catch {}
+  try { page = (await chrome.tabs.sendMessage(tab.id, { type: 'popup-get-state' }, { frameId: 0 })) || page; } catch {}
   $('#status').textContent = page.pageLang ? `页面语言: ${page.pageLang}` : '无法检测页面语言';
 
   const btn = $('#action');
   btn.textContent = page.translated ? '显示原文' : '翻译此页';
   btn.onclick = async () => {
-    if (page.translated) await chrome.tabs.sendMessage(tab.id, { type: 'popup-restore' });
-    else await chrome.tabs.sendMessage(tab.id, { type: 'popup-translate', targetLang: $('#target').value });
-    window.close();
+    try {
+      if (page.translated) await chrome.tabs.sendMessage(tab.id, { type: 'popup-restore' });
+      else await chrome.tabs.sendMessage(tab.id, { type: 'popup-translate', targetLang: $('#target').value });
+      window.close();
+    } catch {
+      $('#status').textContent = '此页面无法翻译';
+    }
   };
 
   const domain = tab.url ? new URL(tab.url).hostname : '';
   const sites = (await chrome.storage.local.get('sites')).sites || {};
+  if (!/^https?:/.test(tab.url || '')) $('#site').disabled = true;
   $('#site').value = sites[domain] || '';
   $('#site').onchange = async (e) => {
     const next = { ...sites };

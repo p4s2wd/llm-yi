@@ -31,15 +31,22 @@ async function init() {
   document.querySelectorAll('input,select').forEach((el) => { el.onchange = save; });
 
   $('#test').onclick = async () => {
+    $('#test').disabled = true;
     $('#testResult').textContent = '测试中…';
-    const r = await chrome.runtime.sendMessage({
-      type: 'test-connection',
-      baseUrl: $('#baseUrl').value.trim(),
-      apiKey: $('#apiKey').value.trim(),
-    });
-    $('#testResult').textContent = r && r.ok
-      ? '✔ 连接成功，可用模型:\n' + (r.models || []).join('\n')
-      : '✘ 连接失败: ' + ((r && (r.error || r.status)) || '未知错误');
+    try {
+      const r = await chrome.runtime.sendMessage({
+        type: 'test-connection',
+        baseUrl: $('#baseUrl').value.trim(),
+        apiKey: $('#apiKey').value.trim(),
+      });
+      $('#testResult').textContent = r && r.ok
+        ? '✔ 连接成功，可用模型:\n' + (r.models || []).join('\n')
+        : '✘ 连接失败: ' + ((r && (r.error || r.status)) || '未知错误');
+    } catch (e) {
+      $('#testResult').textContent = '✘ 连接失败: ' + (e.message || e);
+    } finally {
+      $('#test').disabled = false;
+    }
   };
 }
 init();

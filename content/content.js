@@ -2,10 +2,12 @@
 (() => {
   const SKIP = 'script,style,noscript,textarea,input,select,code,pre,svg,template,[contenteditable],[translate="no"],.notranslate,[data-notranslate]';
   const isTop = window.top === window.self;
-  const originals = new Map(); // node -> 原始 nodeValue
+  const originals = new Map(); // node -> { original, translated }
   const bilingualSpans = [];
   const done = new WeakSet(); // 已翻译节点
   let translating = false, showingOriginal = false, moTimer = null, moStarted = false;
+  let gen = 0; // 请求代际计数：用户操作递增，使迟到的响应作废
+  let pending = false; // 请求期间是否有 DOM 变更，完成后补翻
   const state = { translated: false, pageLang: null, targetLang: null };
 
   function isVisible(node) {
@@ -23,7 +25,12 @@
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
     let node;
     while ((node = walker.nextNode())) {
-      if (done.has(node) || originals.has(node)) continue;
+      if (done.has(node)) {
+        const rec = originals.get(node);
+        const cur = node.nodeValue.replace(/\s+/g, ' ').trim();
+        if (rec && cur !== rec.original && cur !== rec.translated) { done.delete(node); originals.delete(node); }
+        else continue;
+      } else if (originals.has(node)) continue;
       const text = node.nodeValue.replace(/\s+/g, ' ').trim();
       if (text.length < 2 || /^[\d\s.,%$€£¥/:;()\-]+$/.test(text)) continue;
       if (!isVisible(node)) continue;
@@ -37,7 +44,7 @@
     segments.forEach((seg, i) => {
       const t = results[i];
       if (!t || t === seg.text) return;
-      originals.set(seg.node, seg.node.nodeValue);
+      originals.set(seg.node, { original: seg.node.nodeValue, translated: t });
       done.add(seg.node);
       seg.node.nodeValue = t;
       if (bilingual) {
@@ -54,8 +61,9 @@
   }
 
   function restoreOriginal() {
+    gen++;
     translating = true;
-    for (const [node, text] of originals) { node.nodeValue = text; done.delete(node); }
+    for (const [node, v] of originals) { node.nodeValue = v.original; done.delete(node); }
     originals.clear();
     for (const s of bilingualSpans) s.remove();
     bilingualSpans.length = 0;
@@ -90,6 +98,7 @@
   async function doTranslate(sourceLang) {
     if (translating) return;
     restoreOriginal();
+    const myGen = ++gen; // 必须在 restoreOriginal 之后捕获：它内部的 gen++ 会使更早的代际作废
     showingOriginal = false;
     state.targetLang = state.targetLang || 'zh-CN';
     showToolbar();
@@ -99,6 +108,7 @@
     if (isTop) globalThis.trToolbar.progress(0, segments.length);
     try {
       const resp = await requestTranslation(segments, sourceLang);
+      if (myGen !== gen) return; // 等待期间用户已操作，丢弃迟到响应
       if (!resp || !resp.ok) { if (isTop) globalThis.trToolbar.error((resp && resp.error) || '翻译服务不可用'); return; }
       applyResults(segments, resp.results, resp.bilingual);
       if (isTop) { if (resp.partial) globalThis.trToolbar.error('部分段落翻译失败，已保留原文'); else globalThis.trToolbar.done(); }
@@ -107,29 +117,38 @@
       if (isTop) globalThis.trToolbar.error(String((e && e.message) || e));
     } finally {
       translating = false;
+      if (pending && state.translated) { pending = false; setTimeout(translateNew, 800); }
     }
   }
 
   async function translateNew() {
     if (translating || !state.translated) return;
+    const myGen = gen;
+    for (const n of originals.keys()) if (!n.isConnected) originals.delete(n);
+    for (let i = bilingualSpans.length - 1; i >= 0; i--) if (!bilingualSpans[i].isConnected) bilingualSpans.splice(i, 1);
     const segments = collectSegments();
     if (!segments.length) return;
     translating = true;
     try {
       const resp = await requestTranslation(segments, state.pageLang);
+      if (myGen !== gen) return; // 等待期间用户已操作，丢弃迟到响应
       if (resp && resp.ok) applyResults(segments, resp.results, resp.bilingual);
     } catch { /* 增量失败静默，下次 mutation 再试 */ }
-    finally { translating = false; }
+    finally {
+      translating = false;
+      if (pending && state.translated) { pending = false; setTimeout(translateNew, 800); }
+    }
   }
 
   function startObserver() {
     if (moStarted || !document.body) return;
     moStarted = true;
     new MutationObserver(() => {
-      if (translating || !state.translated) return;
+      if (!state.translated) return;
+      if (translating) { pending = true; return; } // 在途请求期间的变更不丢失，完成后补翻
       clearTimeout(moTimer);
       moTimer = setTimeout(translateNew, 800);
-    }).observe(document.body, { childList: true, subtree: true });
+    }).observe(document.body, { childList: true, subtree: true, characterData: true });
   }
 
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
