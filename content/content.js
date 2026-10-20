@@ -28,7 +28,7 @@
       if (done.has(node)) {
         const rec = originals.get(node);
         const cur = node.nodeValue.replace(/\s+/g, ' ').trim();
-        if (rec && cur !== rec.original && cur !== rec.translated) { done.delete(node); originals.delete(node); }
+        if (rec && cur !== rec.original.replace(/\s+/g, ' ').trim() && cur !== rec.translated) { done.delete(node); originals.delete(node); }
         else continue;
       } else if (originals.has(node)) continue;
       const text = node.nodeValue.replace(/\s+/g, ' ').trim();
@@ -42,8 +42,9 @@
   function applyResults(segments, results, bilingual) {
     translating = true;
     segments.forEach((seg, i) => {
-      const t = results[i];
+      let t = results[i];
       if (!t || t === seg.text) return;
+      t = t.replace(/\s+/g, ' ').trim(); // 写回前归一化，与 collectSegments 的检测形成闭环，防无限重译
       originals.set(seg.node, { original: seg.node.nodeValue, translated: t });
       done.add(seg.node);
       seg.node.nodeValue = t;
@@ -62,6 +63,7 @@
 
   function restoreOriginal() {
     gen++;
+    pending = false;
     translating = true;
     for (const [node, v] of originals) { node.nodeValue = v.original; done.delete(node); }
     originals.clear();
@@ -116,8 +118,10 @@
     } catch (e) {
       if (isTop) globalThis.trToolbar.error(String((e && e.message) || e));
     } finally {
-      translating = false;
-      if (pending && state.translated) { pending = false; setTimeout(translateNew, 800); }
+      if (myGen === gen) { // 只有当代请求才有权清标志，被作废的迟到响应不得干扰新一代
+        translating = false;
+        if (pending && state.translated) { pending = false; setTimeout(translateNew, 800); }
+      }
     }
   }
 
@@ -135,8 +139,10 @@
       if (resp && resp.ok) applyResults(segments, resp.results, resp.bilingual);
     } catch { /* 增量失败静默，下次 mutation 再试 */ }
     finally {
-      translating = false;
-      if (pending && state.translated) { pending = false; setTimeout(translateNew, 800); }
+      if (myGen === gen) { // 只有当代请求才有权清标志，被作废的迟到响应不得干扰新一代
+        translating = false;
+        if (pending && state.translated) { pending = false; setTimeout(translateNew, 800); }
+      }
     }
   }
 
@@ -144,8 +150,8 @@
     if (moStarted || !document.body) return;
     moStarted = true;
     new MutationObserver(() => {
-      if (!state.translated) return;
       if (translating) { pending = true; return; } // 在途请求期间的变更不丢失，完成后补翻
+      if (!state.translated) return;
       clearTimeout(moTimer);
       moTimer = setTimeout(translateNew, 800);
     }).observe(document.body, { childList: true, subtree: true, characterData: true });
