@@ -1,12 +1,15 @@
 // 页面翻译工具条（closed shadow DOM）。与 content.js 共享 isolated world，
 // 通过 globalThis.trToolbar 暴露命令式 API。
+// 设计：默认永远收起为小圆点徽标，仅点击徽标展开面板；翻译中/完成后不自动弹出，
+// 工具条不得干扰阅读。出错时徽标变红，细节点击徽标后可见。
 (() => {
   const LANGS = [
     ['auto', '自动检测'], ['zh-CN', '中文'], ['en', 'English'], ['ja', '日本語'],
     ['ko', '한국어'], ['fr', 'Français'], ['de', 'Deutsch'], ['es', 'Español'], ['ru', 'Русский'],
   ];
   let host = null, els = {}, cb = {};
-  let minTimer = null; // done() 后 3 秒自动收纳的定时器句柄
+  let minTimer = null; // 面板展开后翻译完成时自动收起的定时器
+  let expanded = false;
 
   function ensure() {
     if (host) return;
@@ -19,16 +22,18 @@
         select,button{font:inherit;border:1px solid #dadce0;border-radius:4px;background:#fff;padding:2px 6px;cursor:pointer}
         .status{color:#5f6368;max-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
         .status.err{color:#d93025}
-        .badge{width:28px;height:28px;padding:0;border-radius:50%;background:#fff;border:1px solid #dadce0;box-shadow:0 1px 3px rgba(0,0,0,.2);opacity:.75;cursor:pointer;font:13px/26px system-ui,sans-serif;text-align:center}
-        .badge:hover{opacity:1}
+        .badge{display:flex;align-items:center;justify-content:center;width:28px;height:28px;font:14px/1 system-ui,sans-serif;color:rgba(255,255,255,.95);background:#1a73e8;border:none;border-radius:50%;box-shadow:0 1px 4px rgba(0,0,0,.35);cursor:pointer;opacity:.55;transition:opacity .15s}
+        .badge:hover{opacity:.92}
+        .badge.err{background:#d93025;opacity:.85}
       </style>
-      <div class="bar">
+      <div class="bar" style="display:none">
         <select class="src"></select><span>→</span><select class="dst"></select>
         <button class="toggle">显示原文</button>
         <span class="status"></span>
+        <button class="mini" title="收起">—</button>
         <button class="close" title="关闭">✕</button>
       </div>
-      <button class="badge" title="展开翻译工具条" style="display:none">译</button>`;
+      <button class="badge" title="翻译工具条">译</button>`;
     const q = (s) => shadow.querySelector(s);
     els = { bar: q('.bar'), badge: q('.badge'), src: q('.src'), dst: q('.dst'), toggle: q('.toggle'), status: q('.status') };
     for (const [v, label] of LANGS) els.src.add(new Option(label, v));
@@ -36,56 +41,69 @@
     els.src.onchange = () => cb.onSwitchLang && cb.onSwitchLang(els.src.value, els.dst.value);
     els.dst.onchange = () => cb.onSwitchLang && cb.onSwitchLang(els.src.value, els.dst.value);
     els.toggle.onclick = () => cb.onToggleOriginal && cb.onToggleOriginal();
+    q('.mini').onclick = minimizePane;
     q('.close').onclick = () => cb.onClose && cb.onClose();
-    // 徽标点击：从收纳态展开工具条，沿用上次内容与回调，此后不再自动收纳（直到下一次 done()）
-    els.badge.onclick = () => expand();
+    els.badge.onclick = expandPane;
     document.documentElement.appendChild(host);
   }
 
-  // 收纳为小徽标：隐藏完整工具条，仅显示"译"徽标
-  function minimize() {
+  function expandPane() {
+    clearTimeout(minTimer);
+    expanded = true;
+    els.badge.style.display = 'none';
+    els.bar.style.display = '';
+    // 展开态无操作自动收起：悬停拖延，防正要操作时突然消失
+    minTimer = setTimeout(collapseOnIdle, 6000);
+  }
+
+  function collapseOnIdle() {
+    if (host && host.matches(':hover')) { minTimer = setTimeout(collapseOnIdle, 3000); return; }
+    minimizePane();
+  }
+
+  function minimizePane() {
+    expanded = false;
     els.bar.style.display = 'none';
     els.badge.style.display = '';
   }
-  // 展开完整工具条：隐藏徽标，恢复显示
-  function expand() {
-    els.badge.style.display = 'none';
-    els.bar.style.display = '';
-  }
 
   globalThis.trToolbar = {
+    // 默认收纳：仅在页面出现小圆点，绝不自动弹出面板
     show({ sourceLang = 'auto', targetLang = 'zh-CN', showingOriginal = false, onSwitchLang, onToggleOriginal, onClose } = {}) {
       ensure();
-      clearTimeout(minTimer); minTimer = null; // 全新翻译：取消挂起的收纳
-      expand(); // 复位为展开态
       cb = { onSwitchLang, onToggleOriginal, onClose };
       els.src.value = sourceLang;
       els.dst.value = targetLang;
       els.toggle.textContent = showingOriginal ? '显示译文' : '显示原文';
       els.status.textContent = '';
       els.status.className = 'status';
+      els.badge.className = 'badge';
+      els.badge.title = '翻译工具条';
+      clearTimeout(minTimer);
+      minimizePane();
       host.style.display = '';
     },
     progress(done, total) {
       if (!host) return;
-      clearTimeout(minTimer); minTimer = null; // 翻译中：取消收纳，保持展开
-      expand();
+      clearTimeout(minTimer); // 翻译在途不收起已展开的面板
       els.status.textContent = `翻译中 ${done}/${total}`;
       els.status.className = 'status';
+      if (!expanded) els.badge.title = `翻译中 ${done}/${total}`;
     },
     done() {
       if (!host) return;
-      clearTimeout(minTimer); minTimer = null;
       els.status.textContent = '';
-      // 完成后 3 秒自动收纳为小徽标
-      minTimer = setTimeout(minimize, 3000);
+      els.badge.title = '翻译工具条';
+      if (expanded) { clearTimeout(minTimer); minTimer = setTimeout(minimizePane, 3000); } // 展开中的面板完成后自动收起
     },
     error(msg) {
       if (!host) return;
-      clearTimeout(minTimer); minTimer = null; // 错误期间不会被收纳
-      expand(); // 若此刻处于收纳态，先展开，确保错误可见
+      clearTimeout(minTimer);
       els.status.textContent = msg;
       els.status.className = 'status err';
+      // 不强制展开（默认收起原则）；徽标变红提示，细节悬停/点击查看
+      els.badge.className = 'badge err';
+      els.badge.title = String(msg).slice(0, 200);
     },
     hide() { if (host) host.style.display = 'none'; },
   };
