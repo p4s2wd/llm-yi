@@ -135,7 +135,7 @@
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg.type === 'tr-progress') { if (isTop) globalThis.trToolbar.progress(msg.done, msg.total); return; }
     if (msg.type === 'popup-get-state') { sendResponse({ translated: state.translated, showingOriginal, pageLang: state.pageLang }); return; }
-    if (msg.type === 'popup-translate') { doTranslate(msg.sourceLang || state.pageLang || 'auto'); sendResponse({ ok: true }); return; }
+    if (msg.type === 'popup-translate') { if (msg.targetLang) state.targetLang = msg.targetLang; doTranslate(msg.sourceLang || state.pageLang || 'auto'); sendResponse({ ok: true }); return; }
     if (msg.type === 'popup-restore') { restoreOriginal(); showingOriginal = true; showToolbar(); sendResponse({ ok: true }); return; }
   });
 
