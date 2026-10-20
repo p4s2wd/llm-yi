@@ -62,6 +62,7 @@
   }
 
   function restoreOriginal() {
+    cancelRechecks(); // 用户还原或开始新一轮翻译，取消挂起的延迟重判，防止其稍后覆盖用户意图
     gen++;
     pending = false;
     translating = true;
@@ -176,10 +177,14 @@
 
   // JS 重渲染页面的正文在 document_idle 时可能还没出现，语言判定会用导航碎片做出错误结论。
   // 3s/10s 各重判一次：正文渲染完成后样本足够成熟，background 会给出新的判定。
+  let recheckTimers = [];
+  function cancelRechecks() { recheckTimers.forEach(clearTimeout); recheckTimers = []; }
   async function recheck() {
-    if (state.translated || translating) return;
+    if (state.translated || translating || showingOriginal) return;
     const resp = await askPageInit();
     if (!resp || !resp.autoTranslate) return;
+    // await 期间用户可能已手动翻译/还原/关闭，或另一次 recheck 已开翻——复查守卫再动手
+    if (state.translated || translating || showingOriginal) return;
     state.pageLang = resp.pageLang;
     state.targetLang = resp.targetLang;
     doTranslate(resp.pageLang || 'auto');
@@ -192,7 +197,7 @@
     state.pageLang = resp.pageLang;
     state.targetLang = resp.targetLang;
     if (resp.autoTranslate) { doTranslate(resp.pageLang || 'auto'); return; }
-    if (isTop) { setTimeout(recheck, 3000); setTimeout(recheck, 10000); }
+    if (isTop) recheckTimers = [setTimeout(recheck, 3000), setTimeout(recheck, 10000)];
   }
   init();
 })();
