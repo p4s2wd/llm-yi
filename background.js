@@ -3,7 +3,7 @@ import { createCache } from './engine/cache.js';
 import { createPool } from './engine/pool.js';
 import { packSegments } from './engine/chunker.js';
 import { translateBatch } from './engine/api.js';
-import { shouldAutoTranslate, domainOf, normLang } from './engine/rules.js';
+import { shouldAutoTranslate, domainOf, normLang, pickPageLang } from './engine/rules.js';
 
 const storage = {
   get: (keys) => chrome.storage.local.get(keys),
@@ -26,13 +26,11 @@ function isFatal(err) {
 }
 
 async function detectLang({ lang, sample }) {
-  if (lang && normLang(lang)) return normLang(lang);
   try {
     const det = await chrome.i18n.detectLanguage(sample || ' ');
-    const top = (det.languageResults || [])[0];
-    return top ? normLang(top.language) : null;
+    return pickPageLang(lang, det);
   } catch {
-    return null;
+    return normLang(lang) || null;
   }
 }
 
