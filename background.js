@@ -10,7 +10,7 @@ const storage = {
   set: (obj) => chrome.storage.local.set(obj),
 };
 const cache = createCache(storage);
-const jobs = new Map(); // tabId -> AbortController
+const jobs = new Map(); // `${tabId}:${frameId}` -> AbortController
 const REQUEST_TIMEOUT_MS = 60000;
 let pool = null;
 let poolSize = 0;
@@ -120,11 +120,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   if (msg.type === 'translate-page') {
     const controller = new AbortController();
-    if (tabId != null) jobs.set(tabId, controller);
+    const jobKey = tabId != null ? `${tabId}:${sender.frameId ?? 0}` : null;
+    if (jobKey) jobs.set(jobKey, controller);
     translateAll({ ...msg, tabId, signal: controller.signal })
       .then((r) => sendResponse({ ok: true, ...r }))
       .catch((e) => sendResponse({ ok: false, error: String((e && e.message) || e) }))
-      .finally(() => { if (tabId != null) jobs.delete(tabId); });
+      .finally(() => { if (jobKey) jobs.delete(jobKey); });
     return true;
   }
 
@@ -147,9 +148,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 });
 
-function abortJob(tabId) {
-  const c = jobs.get(tabId);
-  if (c) { c.abort(); jobs.delete(tabId); }
+function abortJobs(tabId) {
+  for (const [key, c] of jobs) {
+    if (key.startsWith(`${tabId}:`)) { c.abort(); jobs.delete(key); }
+  }
 }
-chrome.tabs.onRemoved.addListener(abortJob);
-chrome.tabs.onUpdated.addListener((tabId, info) => { if (info.status === 'loading') abortJob(tabId); });
+chrome.tabs.onRemoved.addListener(abortJobs);
+// 仅当中止信号携带 URL（主 frame 真正换址的跨文档导航）才中止在途翻译；
+// SPA hydration 期间的 replaceState 等也会触发 status:loading 但不带 url，不得误杀。
+chrome.tabs.onUpdated.addListener((tabId, info) => { if (info.status === 'loading' && info.url) abortJobs(tabId); });
