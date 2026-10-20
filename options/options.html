@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<style>
+  body{font:14px/1.6 system-ui,sans-serif;max-width:560px;margin:32px auto;padding:0 16px;color:#202124}
+  h1{font-size:20px}
+  label{display:block;margin:14px 0 4px;font-weight:600}
+  input,select{width:100%;padding:8px;border:1px solid #dadce0;border-radius:6px;font:inherit}
+  .check{display:flex;align-items:center;gap:8px;margin:12px 0}
+  .check input{width:auto}
+  button{margin-top:16px;padding:8px 16px;border:1px solid #1a73e8;border-radius:6px;background:#1a73e8;color:#fff;font:inherit;cursor:pointer}
+  #saved{color:#188038;margin-left:8px}
+  #testResult{margin-top:8px;white-space:pre-wrap;color:#5f6368}
+</style>
+</head>
+<body>
+  <h1>Local LLM Translate 设置</h1>
+  <label>API 地址（OpenAI 兼容，含 /v1）</label>
+  <input id="baseUrl" placeholder="http://localhost:8000/v1">
+  <label>API Key</label>
+  <input id="apiKey" type="password" placeholder="sk-...">
+  <label>模型名</label>
+  <input id="model" placeholder="qwen35-122b">
+  <label>并发请求数（1-8）</label>
+  <input id="concurrency" type="number" min="1" max="8" value="3">
+  <label>默认目标语言</label>
+  <select id="targetLang"></select>
+  <div class="check"><input id="bilingual" type="checkbox"><label for="bilingual" style="margin:0">双语显示（译文下附灰色原文）</label></div>
+  <div class="check"><input id="autoLang" type="checkbox"><label for="autoLang" style="margin:0">自动翻译非目标语言页面</label></div>
+  <button id="test">测试连接</button><span id="saved"></span>
+  <pre id="testResult"></pre>
+  <script src="options.js"></script>
+</body>
+</html>

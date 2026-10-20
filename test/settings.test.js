@@ -1,0 +1,33 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { DEFAULTS, loadSettings, saveSettings } from '../engine/settings.js';
+import { fakeStorage } from './helpers.js';
+
+test('loadSettings returns defaults when empty', async () => {
+  const s = await loadSettings(fakeStorage());
+  assert.equal(s.model, DEFAULTS.model);
+  assert.equal(s.baseUrl, 'http://localhost:8000/v1');
+  assert.equal(s.apiKey, '');
+});
+
+test('loadSettings merges stored over defaults and drops unknown keys', async () => {
+  const s = await loadSettings(fakeStorage({ settings: { model: 'other', junk: 1 } }));
+  assert.equal(s.model, 'other');
+  assert.equal(s.baseUrl, DEFAULTS.baseUrl);
+  assert.equal(s.junk, undefined);
+});
+
+test('saveSettings persists merged settings and ignores unknown keys', async () => {
+  const st = fakeStorage();
+  const next = await saveSettings(st, { model: 'x', junk: 1 });
+  assert.equal(next.model, 'x');
+  assert.equal(next.junk, undefined);
+  assert.deepEqual(st.db.settings, next);
+});
+
+test('saveSettings merges patch into existing stored settings', async () => {
+  const st = fakeStorage({ settings: { apiKey: 'k', model: 'a' } });
+  await saveSettings(st, { model: 'b' });
+  assert.equal(st.db.settings.apiKey, 'k');
+  assert.equal(st.db.settings.model, 'b');
+});

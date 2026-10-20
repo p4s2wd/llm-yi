@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<style>
+  body{font:13px/1.5 system-ui,sans-serif;width:260px;margin:0;padding:12px}
+  select,button{font:inherit;width:100%;margin:6px 0;padding:6px;border:1px solid #dadce0;border-radius:6px;background:#fff;cursor:pointer}
+  button.primary{background:#1a73e8;color:#fff;border-color:#1a73e8}
+  label{display:block;margin-top:8px;color:#3c4043}
+  .row{display:flex;gap:6px;align-items:center;justify-content:space-between;margin-top:10px}
+  a{color:#1a73e8;cursor:pointer}
+</style>
+</head>
+<body>
+  <button id="action" class="primary">翻译此页</button>
+  <label>目标语言 <select id="target"></select></label>
+  <label>本站 <select id="site"><option value="">默认（按语言规则）</option><option value="always">总是翻译</option><option value="never">永不翻译</option></select></label>
+  <div class="row"><span id="status"></span><a id="settings">设置</a></div>
+  <script src="popup.js"></script>
+</body>
+</html>
