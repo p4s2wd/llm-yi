@@ -125,7 +125,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     translateAll({ ...msg, tabId, signal: controller.signal })
       .then((r) => sendResponse({ ok: true, ...r }))
       .catch((e) => sendResponse({ ok: false, error: String((e && e.message) || e) }))
-      .finally(() => { if (jobKey) jobs.delete(jobKey); });
+      .finally(() => { if (jobKey && jobs.get(jobKey) === controller) jobs.delete(jobKey); });
     return true;
   }
 
@@ -156,4 +156,4 @@ function abortJobs(tabId) {
 chrome.tabs.onRemoved.addListener(abortJobs);
 // 仅当中止信号携带 URL（主 frame 真正换址的跨文档导航）才中止在途翻译；
 // SPA hydration 期间的 replaceState 等也会触发 status:loading 但不带 url，不得误杀。
-chrome.tabs.onUpdated.addListener((tabId, info) => { if (info.status === 'loading' && info.url) abortJobs(tabId); });
+chrome.tabs.onUpdated.addListener((tabId, info) => { if (info.status === 'loading' && info.url && (info.frameId ?? 0) === 0) abortJobs(tabId); });
