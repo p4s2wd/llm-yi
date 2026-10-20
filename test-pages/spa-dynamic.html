@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>SPA Dynamic Test</title></head>
+<body>
+  <h1>Dynamic Content Test</h1>
+  <p>This paragraph exists from the start and should be translated.</p>
+  <p id="live">Initial text of the live paragraph. It will be updated in place.</p>
+  <button id="add">Add paragraph</button>
+  <button id="update">Update paragraph in place</button>
+  <div id="feed"></div>
+  <script>
+    let n = 0;
+    document.getElementById('add').addEventListener('click', () => {
+      const p = document.createElement('p');
+      p.textContent = `Dynamically added paragraph number ${++n}. It should be translated automatically after a short delay.`;
+      document.getElementById('feed').appendChild(p);
+    });
+    const live = document.getElementById('live');
+    const liveNode = live.firstChild;
+    document.getElementById('update').addEventListener('click', () => {
+      // Simulate a framework updating text in place (nodeValue assignment, no childList mutation)
+      liveNode.nodeValue = `This text was replaced in place at ${new Date().toLocaleTimeString()}. It should be re-translated.`;
+    });
+    setInterval(() => {
+      const p = document.createElement('p');
+      p.textContent = `Auto-appended message at ${new Date().toLocaleTimeString()}.`;
+      document.getElementById('feed').appendChild(p);
+    }, 3000);
+  </script>
+</body>
+</html>
